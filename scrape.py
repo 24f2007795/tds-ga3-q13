@@ -1,46 +1,59 @@
 import asyncio
 from playwright.async_api import async_playwright
 
-async def get_sum(page, url):
-    await page.goto(url)
+async def get_sum(url):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto(url)
+        
+        try:
+            # Wait for at least one table
+            await page.wait_for_selector('table', timeout=10000)
+        except Exception:
+            pass
 
-    # wait for table to load (dynamic content)
-    await page.wait_for_selector("table")
-    await page.wait_for_timeout(1000)
+        # small wait to ensure JS is executed
+        await page.wait_for_timeout(2000)
 
-    return await page.evaluate("""
-        () => {
+        # In Playwright, we can evaluate a script on the page
+        table_sum = await page.evaluate(r'''() => {
             let total = 0;
             const tables = document.querySelectorAll('table');
             for (const table of tables) {
-                const cells = table.querySelectorAll('td, th');
+                const cells = table.querySelectorAll('td, th'); // th also sometimes contains numbers
                 for (const cell of cells) {
                     const text = cell.innerText.trim();
-                    if (/^-?[0-9]+(\\.[0-9]+)?$/.test(text)) {
-                        total += parseFloat(text);
+                    if (text) {
+                        const val = parseFloat(text);
+                        if (!isNaN(val)) {
+                            // Check if it's strictly a number or if we need more logic
+                            // typically just parsefloat is enough, but some things like "12A" would parse as 12.
+                            // To be safer, use regex or strict cast.
+                            if (/^-?[0-9]+(?:\.[0-9]+)?$/.test(text)) {
+                                total += val;
+                            }
+                        }
                     }
                 }
             }
             return total;
-        }
-    """)
+        }''')
+        await browser.close()
+        return table_sum
 
 async def main():
-    seeds = range(6, 16)  # 78 to 87
+    seeds = range(78, 88)
     total_sum = 0
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        for seed in seeds:
-            url = f"https://sanand0.github.io/tdsdata/js_table/?seed={seed}"
-            s = await get_sum(page, url)
+    for seed in seeds:
+        url = f"https://sanand0.github.io/tdsdata/js_table/?seed={seed}"
+        try:
+            s = await get_sum(url)
+            print(f"Seed {seed}: {s}")
             total_sum += s
-
-        await browser.close()
-
-    print(f"TOTAL_SUM={total_sum}")  # IMPORTANT FORMAT
+        except Exception as e:
+            print(f"Failed for seed {seed}: {e}")
+    print(f"Total sum: {total_sum}")
 
 if __name__ == "__main__":
     asyncio.run(main())
